@@ -13,6 +13,7 @@ import os
 import sys
 from PIL import Image
 from typing import NamedTuple
+from scene.city_readers import readCityInfo
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
@@ -121,6 +122,9 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_fold
         if not os.path.exists(image_path):
             image_path = os.path.join(images_folder, f"{extr.name[:-n_remove]}.png")
             image_name = f"{extr.name[:-n_remove]}.png"
+        
+        if not os.path.exists(image_path):
+            continue
 
         mask_path = os.path.join(masks_folder, f"{extr.name[:-n_remove]}.png") if masks_folder != "" else ""
         depth_path = os.path.join(depths_folder, f"{extr.name[:-n_remove]}.png") if depths_folder != "" else ""
@@ -177,7 +181,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffhold=None):
+def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffhold=None, type='merge'):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -255,6 +259,15 @@ def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffh
 
     train_cam_infos = [c for c in cam_infos if train_test_exp or not c.is_test]
     test_cam_infos = [c for c in cam_infos if c.is_test]
+    
+    if type != "merge":
+        if type == 'aerial':
+            train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if "street" not in c.image_path]
+            test_cam_infos = [c for idx, c in enumerate(test_cam_infos) if "street" not in c.image_path]
+        elif type == 'street':
+            train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if "street" in c.image_path]
+            test_cam_infos = [c for idx, c in enumerate(test_cam_infos) if "street" in c.image_path]
+            
     print(len(test_cam_infos), "test images")
     print(len(train_cam_infos), "train images")
 
@@ -269,5 +282,6 @@ def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffh
 
 
 sceneLoadTypeCallbacks = {
-    "Colmap": readColmapSceneInfo
+    "Colmap": readColmapSceneInfo,
+    "matrixcity": readCityInfo
 }

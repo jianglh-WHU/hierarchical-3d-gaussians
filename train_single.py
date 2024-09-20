@@ -11,6 +11,7 @@
 
 import os
 import torch
+from utils.image_utils import psnr
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
@@ -21,6 +22,31 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+import shutil
+from pathlib import Path
+
+def saveRuntimeCode(dst: str) -> None:
+    additionalIgnorePatterns = ['.git', '.gitignore']
+    ignorePatterns = set()
+    ROOT = '.'
+    assert os.path.exists(os.path.join(ROOT, '.gitignore'))
+    with open(os.path.join(ROOT, '.gitignore')) as gitIgnoreFile:
+        for line in gitIgnoreFile:
+            if not line.startswith('#'):
+                if line.endswith('\n'):
+                    line = line[:-1]
+                if line.endswith('/'):
+                    line = line[:-1]
+                ignorePatterns.add(line)
+    ignorePatterns = list(ignorePatterns)
+    for additionalPattern in additionalIgnorePatterns:
+        ignorePatterns.append(additionalPattern)
+
+    log_dir = Path(__file__).resolve().parent
+
+    shutil.copytree(log_dir, dst, ignore=shutil.ignore_patterns(*ignorePatterns))
+    
+    print('Backup Finished!')
 
 def direct_collate(x):
     return x
@@ -128,7 +154,11 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                     ema_loss_for_log = 0.4 * photo_loss.item() + 0.6 * ema_loss_for_log
                     ema_Ll1depth_for_log = 0.4 * Ll1depth + 0.6 * ema_Ll1depth_for_log
                     if iteration % 10 == 0:
-                        progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}", "Depth Loss": f"{ema_Ll1depth_for_log:.{7}f}", "Size": f"{gaussians._xyz.size(0)}"})
+                        if viewpoint_cam.alpha_mask is not None:
+                            psnr_log = psnr(image*alpha_mask, gt_image*alpha_mask).mean().double()
+                        else:
+                            psnr_log = psnr(image, gt_image).mean().double()
+                        progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}", "Depth Loss": f"{ema_Ll1depth_for_log:.{7}f}", "Size": f"{gaussians._xyz.size(0)}", "psnr":f"{psnr_log:.{3}f}"})
                         progress_bar.update(10)
 
                     # Log and save
@@ -231,12 +261,25 @@ if __name__ == "__main__":
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
+    
+    # save code
+    try:
+        saveRuntimeCode(os.path.join(lp.model_path, 'backup'))
+    except:
+        print(f'save code failed~')
+    
+    # update args
+    lp = lp.extract(args)
+    op = op.extract(args)
+    pp = pp.extract(args)
+    op.densify_until_iter = op.iterations // 2
+    op.position_lr_max_steps = op.iterations
 
     # Start GUI server, configure and run training
     if not args.disable_viewer:
         network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp, op, pp, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
 
     # All done
     print("\nTraining complete.")

@@ -6,3 +6,8 @@ tensorboard_3d
 screenshots
 
 submodules/*
+submodules/Depth-Anything-V2
+submodules/gaussianhierarchy
+submodules/hierarchy-rasterizer
+submodules/simple-knn
+data/*

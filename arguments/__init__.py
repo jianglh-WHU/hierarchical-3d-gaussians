@@ -65,6 +65,11 @@ class ModelParams(ParamGroup):
         self.scaffold_file = ""
         self.bounds_file = ""
         self.skybox_locked = False
+        
+        self.data_format = 'colmap'
+        self.type = 'merge'
+        self.ratio = 1
+        self.scale = 0.1
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):

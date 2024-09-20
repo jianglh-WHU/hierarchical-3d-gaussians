@@ -36,21 +36,33 @@ def loadCam(args, id, cam_info, resolution_scale, is_test_dataset):
             raise
     else:
         alpha_mask = None
-       
-    if cam_info.depth_path != "":
-        try:
-            invdepthmap = cv2.imread(cam_info.depth_path, -1).astype(np.float32) / float(2**16)
-        except FileNotFoundError:
-            print(f"Error: The depth file at path '{cam_info.depth_path}' was not found.")
-            raise
-        except IOError:
-            print(f"Error: Unable to open the image file '{cam_info.depth_path}'. It may be corrupted or an unsupported format.")
-            raise
-        except Exception as e:
-            print(f"An unexpected error occurred when trying to read depth at {cam_info.depth_path}: {e}")
-            raise
+    
+    data_format = args.data_format
+    if data_format == 'colmap':
+        if cam_info.depth_path != "":
+            try:
+                invdepthmap = cv2.imread(cam_info.depth_path, -1).astype(np.float32) / float(2**16)
+            except FileNotFoundError:
+                print(f"Error: The depth file at path '{cam_info.depth_path}' was not found.")
+                raise
+            except IOError:
+                print(f"Error: Unable to open the image file '{cam_info.depth_path}'. It may be corrupted or an unsupported format.")
+                raise
+            except Exception as e:
+                print(f"An unexpected error occurred when trying to read depth at {cam_info.depth_path}: {e}")
+                raise
+        else:
+            invdepthmap = None
+    elif data_format == 'matrixcity':
+        if cam_info.depth_path != "":
+            depth_scale = 10000.0 * cam_info.depth_params['scale']
+            gt_depth = cv2.imread(cam_info.depth_path, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)[..., 0] / depth_scale
+            # gt_depth = torch.from_numpy(cv2.resize(gt_depth, resolution)[None])
+            invdepthmap = 1. / gt_depth
+        else:
+            invdepthmap = None
     else:
-        invdepthmap = None
+        raise ValueError("wrong data_type!!")
 
     orig_w, orig_h = image.size
 
@@ -75,10 +87,10 @@ def loadCam(args, id, cam_info, resolution_scale, is_test_dataset):
 
     return Camera(resolution, colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, depth_params=cam_info.depth_params,
-                  primx=cam_info.primx, primy=cam_info.primy,
+                  primx=cam_info.primx, primy=cam_info.primy, image_path = cam_info.image_path,
                   image=image, alpha_mask=alpha_mask, invdepthmap=invdepthmap,
                   image_name=cam_info.image_name, uid=id, data_device=args.data_device, 
-                  train_test_exp=args.train_test_exp, is_test_dataset=is_test_dataset, is_test_view=cam_info.is_test)
+                  train_test_exp=args.train_test_exp, is_test_dataset=is_test_dataset, is_test_view=cam_info.is_test, data_type=data_format)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []
