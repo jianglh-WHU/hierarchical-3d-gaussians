@@ -5,9 +5,11 @@ build
 tensorboard_3d
 screenshots
 
-submodules/*
+submodules
 submodules/Depth-Anything-V2
 submodules/gaussianhierarchy
 submodules/hierarchy-rasterizer
 submodules/simple-knn
-data/*
+data
+
+run_scripts

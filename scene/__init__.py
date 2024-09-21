@@ -46,7 +46,7 @@ class Scene:
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.alpha_masks, args.depths, args.eval, args.train_test_exp, type=args.type)
         elif args.data_format == 'matrixcity':
             print("Use matrixcity data set!")
-            scene_info = sceneLoadTypeCallbacks["matrixcity"](args.source_path, args.eval, ratio=args.ratio, scale=args.scale, type=args.type, llffhold=50)
+            scene_info = sceneLoadTypeCallbacks["matrixcity"](args.source_path, args.eval, ratio=args.ratio, scale=args.scale, type=args.type, llffhold=32)
         else:
             assert False, "Could not recognize scene type!"
 

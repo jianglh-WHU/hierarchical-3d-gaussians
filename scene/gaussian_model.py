@@ -524,6 +524,16 @@ class GaussianModel:
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
 
         self.active_sh_degree = self.max_sh_degree
+        
+        exposure_file = os.path.join(path, "exposure.json")
+        if os.path.exists(exposure_file):
+            with open(exposure_file, "r") as f:
+                exposures = json.load(f)
+
+            self.pretrained_exposures = {image_name: torch.FloatTensor(exposures[image_name]).requires_grad_(False).cuda() for image_name in exposures}
+        else:
+            print(f"No exposure to be loaded at {exposure_file}")
+            self.pretrained_exposures = None
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}

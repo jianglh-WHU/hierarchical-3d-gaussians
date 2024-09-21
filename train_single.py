@@ -25,6 +25,14 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 import shutil
 from pathlib import Path
 
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    TENSORBOARD_FOUND = True
+    print("found tf board")
+except ImportError:
+    TENSORBOARD_FOUND = False
+    print("not found tf board")
+
 def saveRuntimeCode(dst: str) -> None:
     additionalIgnorePatterns = ['.git', '.gitignore']
     ignorePatterns = set()
@@ -48,12 +56,83 @@ def saveRuntimeCode(dst: str) -> None:
     
     print('Backup Finished!')
 
+
+def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, logger=None):
+    if tb_writer:
+        tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
+        tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
+        tb_writer.add_scalar('iter_time', elapsed, iteration)
+
+    # Report test and samples of training set
+    if iteration in testing_iterations:
+        torch.cuda.empty_cache()
+        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
+                              {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
+        
+        for config in validation_configs:
+            if config['cameras'] and len(config['cameras']) > 0:
+                l1_test = 0.0
+                psnr_test = 0.0
+                
+                aerial_l1_test = []
+                aerial_psnr_test = []
+                
+                street_l1_test = []
+                street_psnr_test = []
+                
+                for idx, viewpoint in enumerate(config['cameras']):
+                    
+                    # breakpoint()
+                    image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
+                    gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
+                    if tb_writer and (idx < 5):
+                        tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
+                        if iteration == testing_iterations[0]:
+                            tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
+                    
+                    if viewpoint.alpha_mask is not None:
+                        alpha_mask = viewpoint.alpha_mask.cuda()
+                        image = image*alpha_mask
+                        gt_image = gt_image*alpha_mask
+
+                    _l1_loss = l1_loss(image, gt_image).mean().double()
+                    _psnr = psnr(image, gt_image).mean().double()
+                    l1_test += _l1_loss
+                    psnr_test += _psnr
+                    
+                    if "street" in viewpoint.image_path:
+                        street_l1_test.append(_l1_loss)
+                        street_psnr_test.append(_psnr)
+                    else:
+                        aerial_l1_test.append(_l1_loss)
+                        aerial_psnr_test.append(_psnr)
+                        
+                psnr_test /= len(config['cameras'])
+                l1_test /= len(config['cameras'])   
+                aerial_l1_test = torch.tensor(aerial_l1_test).mean().double()
+                aerial_psnr_test = torch.tensor(aerial_psnr_test).mean().double()
+                street_l1_test = torch.tensor(street_l1_test).mean().double()
+                street_psnr_test = torch.tensor(street_psnr_test).mean().double()
+                      
+                logger.info("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
+                logger.info("\n[ITER {}] Evaluating {}: aerial_L1 {} aerial_PSNR {}".format(iteration, config['name'], aerial_l1_test, aerial_psnr_test))
+                logger.info("\n[ITER {}] Evaluating {}: street_L1 {} street_PSNR {}".format(iteration, config['name'], street_l1_test, street_psnr_test))
+                if tb_writer:
+                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
+                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
+
+        if tb_writer:
+            tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
+            tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
+        torch.cuda.empty_cache()
+        
+
 def direct_collate(x):
     return x
 
-def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, saving_iterations, testing_iterations, checkpoint_iterations, checkpoint, debug_from, logger=None):
     first_iter = 0
-    prepare_output_and_logger(dataset)
+    tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
@@ -145,7 +224,6 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                 else:
                     Ll1depth = 0
 
-
                 loss.backward()
                 iter_end.record()
 
@@ -162,8 +240,9 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                         progress_bar.update(10)
 
                     # Log and save
+                    # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), logger)
                     if (iteration in saving_iterations):
-                        print("\n[ITER {}] Saving Gaussians".format(iteration))
+                        logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
                         scene.save(iteration)
                         print("peak memory: ", torch.cuda.max_memory_allocated(device='cuda'))
 
@@ -235,6 +314,24 @@ def prepare_output_and_logger(args):
     with open(os.path.join(args.model_path, "cfg_args"), 'w') as cfg_log_f:
         cfg_log_f.write(str(Namespace(**vars(args))))
 
+def get_logger(path):
+    import logging
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO) 
+    fileinfo = logging.FileHandler(os.path.join(path, "outputs.log"))
+    fileinfo.setLevel(logging.INFO) 
+    controlshow = logging.StreamHandler()
+    controlshow.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s: %(message)s")
+    fileinfo.setFormatter(formatter)
+    controlshow.setFormatter(formatter)
+
+    logger.addHandler(fileinfo)
+    logger.addHandler(controlshow)
+
+    return logger
+
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -246,14 +343,36 @@ if __name__ == "__main__":
     parser.add_argument('--disable_viewer', action='store_true', default=False)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[-1])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[-1])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
-    print("Optimizing " + args.model_path)
+    # update args
+    lp = lp.extract(args)
+    op = op.extract(args)
+    pp = pp.extract(args)
+    
+    op.densify_until_iter = op.iterations // 2
+    op.position_lr_max_steps = op.iterations
+    
+    if args.test_iterations[0] == -1:
+        args.test_iterations = [i for i in range(10000, op.iterations + 1, 10000)]
+    if len(args.test_iterations) == 0 or args.test_iterations[-1] != op.iterations:
+        args.test_iterations.append(op.iterations)
+
+    if args.save_iterations[0] == -1:
+        args.save_iterations = [i for i in range(10000, op.iterations + 1, 10000)]
+    if len(args.save_iterations) == 0 or args.save_iterations[-1] != op.iterations:
+        args.save_iterations.append(op.iterations)
+    
+    os.makedirs(lp.model_path, exist_ok=True)
+    logger = get_logger(lp.model_path)
+    
+    logger.info("Optimizing " + args.model_path)
 
     if args.eval and args.exposure_lr_init > 0 and not args.train_test_exp: 
         print("Reconstructing for evaluation (--eval) with exposure optimization on the train set but not for the test set.")
@@ -268,18 +387,12 @@ if __name__ == "__main__":
     except:
         print(f'save code failed~')
     
-    # update args
-    lp = lp.extract(args)
-    op = op.extract(args)
-    pp = pp.extract(args)
-    op.densify_until_iter = op.iterations // 2
-    op.position_lr_max_steps = op.iterations
 
     # Start GUI server, configure and run training
     if not args.disable_viewer:
         network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp, op, pp, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp, op, pp, args.save_iterations, args.test_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, logger)
 
     # All done
-    print("\nTraining complete.")
+    logger.info("\nTraining complete.")

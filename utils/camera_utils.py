@@ -16,6 +16,7 @@ from utils.graphics_utils import fov2focal
 from PIL import Image
 import os, sys
 import cv2
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
 WARNED = False
 

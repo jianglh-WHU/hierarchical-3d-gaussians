@@ -42,14 +42,17 @@ def render_set(args, scene, pipe, out_dir, eval):
     psnr_test = 0.0
     ssims = 0.0
     lpipss = 0.0
+    gs_nums = 0.0
     
     aerial_ssims = []
     aerial_psnrs = []
     aerial_lpipss = []
+    aerial_gs_nums = []
     
     street_ssims = []
     street_psnrs = []
     street_lpipss = []
+    street_gs_nums = []
 
     cameras = scene.getTestCameras() if eval else scene.getTrainCameras()
     
@@ -105,19 +108,23 @@ def render_set(args, scene, pipe, out_dir, eval):
         _psnr = psnr(image, gt_image).mean().double()
         _ssim = ssim(image, gt_image).mean().double()
         _lpips = lpips(image, gt_image, net_type='vgg').mean().double()
+        _gs_num = render_pkg["gs_nums"]
         
         psnr_test += _psnr
         ssims += _ssim
         lpipss += _lpips
+        gs_nums += _gs_num
         
         if "street" in viewpoint.image_path:
             street_psnrs.append(_psnr)
             street_ssims.append(_ssim)
             street_lpipss.append(_lpips)
+            street_gs_nums.append(_gs_num)
         else:
             aerial_psnrs.append(_psnr)
             aerial_ssims.append(_ssim)
             aerial_lpipss.append(_lpips)
+            aerial_gs_nums.append(_gs_num)
 
         torch.cuda.empty_cache()
         
@@ -129,24 +136,26 @@ def render_set(args, scene, pipe, out_dir, eval):
     psnr_test /= nums
     ssims /= nums
     lpipss /= nums
+    gs_nums /= nums
     
     aerial_psnr = torch.tensor(aerial_psnrs).mean()
     aerial_ssim = torch.tensor(aerial_ssims).mean()
     aerial_lpips = torch.tensor(aerial_lpipss).mean()
+    aerial_gs_nums = np.mean(aerial_gs_nums)
     
     street_psnr = torch.tensor(street_psnrs).mean()
     street_ssim = torch.tensor(street_ssims).mean()
     street_lpips = torch.tensor(street_lpipss).mean()
+    street_gs_nums = np.mean(street_gs_nums)
     
-    
-    print(f"PSNR: {psnr_test:.5f} SSIM: {ssims:.5f} LPIPS: {lpipss:.5f}")
-    print(f"aerial_PSNR: {aerial_psnr:.5f} aerial_SSIM: {aerial_ssim:.5f} aerial_LPIPS: {aerial_lpips:.5f}")
-    print(f"street_PSNR: {street_psnr:.5f} street_SSIM: {street_ssim:.5f} street_LPIPS: {street_lpips:.5f}")
+    print(f"PSNR: {psnr_test:.5f} SSIM: {ssims:.5f} LPIPS: {lpipss:.5f} GS_NUM: {gs_nums:.5f}")
+    print(f"aerial_PSNR: {aerial_psnr:.5f} aerial_SSIM: {aerial_ssim:.5f} aerial_LPIPS: {aerial_lpips:.5f} GS_NUM: {aerial_gs_nums:.5f}")
+    print(f"street_PSNR: {street_psnr:.5f} street_SSIM: {street_ssim:.5f} street_LPIPS: {street_lpips:.5f} GS_NUM: {street_gs_nums:.5f}")
     
     with open(os.path.join(out_dir,"metric.txt"), "w") as file:
-        file.write(f"PSNR: {psnr_test:.5f} SSIM: {ssims:.5f} LPIPS: {lpipss:.5f} ")
-        file.write(f"aerial_PSNR: {aerial_psnr:.5f} aerial_SSIM: {aerial_ssim:.5f} aerial_LPIPS: {aerial_lpips:.5f}")
-        file.write(f"street_PSNR: {street_psnr:.5f} street_SSIM: {street_ssim:.5f} street_LPIPS: {street_lpips:.5f}")
+        file.write(f"PSNR: {psnr_test:.5f} SSIM: {ssims:.5f} LPIPS: {lpipss:.5f} GS_NUM: {gs_nums:.5f}")
+        file.write(f"aerial_PSNR: {aerial_psnr:.5f} aerial_SSIM: {aerial_ssim:.5f} aerial_LPIPS: {aerial_lpips:.5f} GS_NUM: {aerial_gs_nums:.5f}")
+        file.write(f"street_PSNR: {street_psnr:.5f} street_SSIM: {street_ssim:.5f} street_LPIPS: {street_lpips:.5f} GS_NUM: {street_gs_nums:.5f}")
 
 if __name__ == "__main__":
     # Set up command line argument parser

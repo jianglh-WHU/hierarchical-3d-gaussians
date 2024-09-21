@@ -223,7 +223,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readCityInfo(path, eval,ratio=1,scale=0.1, llffhold=50, type='merge'):
+def readCityInfo(path, eval,ratio=1,scale=0.1, llffhold=32, type='merge'):
     # load ply
     ply_path = glob.glob(os.path.join(path, "*.ply"))[0]
     if os.path.exists(ply_path):
@@ -244,6 +244,8 @@ def readCityInfo(path, eval,ratio=1,scale=0.1, llffhold=50, type='merge'):
     if is_chunk:
         train_cam_infos = readCamerasFromCityTransforms(path, "transforms.json", extension, is_debug=is_debug,scale=scale)
         test_cam_infos = []
+        
+        train_cam_infos = sorted(train_cam_infos, key=lambda x: x.image_path)
         
         if eval:
             train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if idx % llffhold != 0]
